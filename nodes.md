@@ -6,20 +6,29 @@
 
 #### Behaviors
 
+* assignExpression - stub
 * bind - bind each child node
-* eachChild - iterate over child nodes by using the node's `keys` property
-* findParent - UNUSED????
-* gatherPossibleValues - stub
-* getValue - stub
-* hasEffects - iterate over child nodes, returning true if any child node has effects
+* eachChild - iterate over child nodes by using the node's `keys` property, calling the callback for each
+* gatherPossibleValues - add `UNKNOWN_ASSIGNMENT` to values set
+* getValue - return `UNKNOWN_VALUE`
+* hasEffects - return true if node's `included` property is true or any child nodes have effects
+* hasEffectsWhenAssigned - return false
+* hasEffectsWhenMutated - return false
+* includeDeclaration - return result of calling node's includeInBundle method
+* includeInBundle
+  * if already fully included, return false
+  * iterate over child nodes and call their `includeInBundle` method. If any of them return true, set node's `included property to true.
+  * return false if already included and no child node's `includeInBundle` returned true, otherwise return true
 * initialise - run in order: `intialiseScope`, `initialiseNode`, `initialiseChildren`
-* initialiseChildren - call each child node's `initialise` method
+* initialiseChildren - call each child node's `initialise` method, passing it the node's scope
 * initialiseNode - stub
 * initialiseScope - assign provided scope
 * insertSemicolon - add a semicolon to the code string
+* isFullyIncluded - is node's `_isFullyIncluded` is already true, return true. Otherwise, set node's `_isFullyIncluded` value using node's `included` property and calling all child nodes' `isFullyIncluded` methods.
 * locate - return an object that describes the location of the node
 * render - call each child node's render method
-* run - set `ran` to true and run each child node (only run once per node)
+* shouldBeIncluded - return result of calling node's `hasEffects` method
+* someChild - similar to eachChild, but using `some` instead of `forEach`
 * toString - returns the node's code string
 
 ### Function
@@ -28,12 +37,12 @@
 
 #### Behaviors
 
-* hasEffects - return `false`
 * bind - bind identifier (if there is one), params, and body
+* hasEffects - return node's `included` value
 * initialiseChildren
   * for each param, initialize it and add as declaration to local scope
   * initialize the body, possibly replacing body's existing scope
-* initialiseScope - create a new scope
+* initialiseScope - create a new scope that is a lexical boundary
 
 ### Statement
 
@@ -41,8 +50,7 @@
 
 #### Behaviors
 
-* render - if treeshaking and `shouldInclude` is false, remove the code
-* run - set `setInclude` to true
+* render - if treeshaking and `included` is false, remove the code. otherwise, render it
 
 ### Class
 
@@ -50,36 +58,34 @@
 
 #### Behaviors
 
-* activate
-  * set `activated` to true
-  * if there is a super class, run that
-  * run the body node
 * addReference - stub
 * getName - return the class's name
 * initialiseChildren - If there is a super class, initialize that. Then, initialize the body node
-* initializeScope - Create a new scope
+* initializeScope - Create a new scope that is a block scope
 
 ====
 
 ## Types
 
-### ArrayExpression
+### ArrayPattern
 
-[Source](https://github.com/rollup/rollup/blob/master/src/ast/nodes/ArrayExpression.js)
+[Source](https://github.com/rollup/rollup/blob/master/src/ast/nodes/ArrayPattern.js)
 
 #### Example 
 
 ```js
-[1, 2, 3]
+// the array param
+function thing([a, b, c]) {}
 ```
 
 #### Properties
 
-* elements - array of `Literal`s and expressions
+* elements - array of `Identifier`s and `AssignmentPattern`s
 
 #### Behaviors
 
-* gatherPossibleValues - Add array to values set
+* assignExpression - for each child node, assign them an `UNKNOWN_ASSIGNMENT` expression
+* hasEffectsWhenAssigned - 
 
 ### ArrowFunctionExpression
 
@@ -100,7 +106,7 @@ Inherits from [Function](#function)
 
 ##### Behaviors
 
-* initialiseScope - creates a new scope
+* initialiseScope - creates a new scope that is neither a block scope nor a lexical boundary
 
 ### AssignmentExpression
 
@@ -121,11 +127,11 @@ x = 5
 #### Behaviors
 
 * bind
-  * store left as expressions' subject
+  * call `Node.bind`
   * throw an error if assignment is not allowed
-  * when left is an `Identifier`, find its declaration, mark that is it re-assigned, and update's possible values (based on operator type)
-* hasEffects - return true if the subject node (left) is used in the scope or right node has effects
-* intialiseNode - if at the program level, add node to dependent expressions array
+  * assign the `right` node to the `left` node
+* hasEffects - return `Node.hasEffects` value or if `left` node has effects when assigned
+* hasEffectsWhenMutated - return true
 
 ### BinaryExpression
 
@@ -145,7 +151,8 @@ variable === 24
 
 #### Behaviors
 
-* getValue - if left, right, or operator is unknown, return unknown. Otherwise, return result of executing expression
+* getValue - if left, right, or operator is unknown, return `UNKNOWN_VALUE`. Otherwise, return result of executing expression
+* hasEffectsWhenMutated - return true
 
 ### BlockStatement
 
@@ -169,9 +176,13 @@ Inherits from [Statement](#statement)
 #### Behaviors
 
 * bind - bind each node in the body array
+* includeInBundle
+  * if already fully included, return false
+  * iterate over nodes in body array, tracking if any that aren't already included should be
+  * if the node is not already included or there are new nodes to include, set node's `included` property to true and return true. otherwise, return false
 * initialiseAndReplaceScope - similar to initialise (from Node), but sets scope to the provided scope instead of creating a new scope.
 * initialiseChildren - initialize each node in the body array and link them together by setting `node.next` to the the next node's `start`
-* initialiseScope - create a new scope
+* initialiseScope - create a new scope that is a block scope
 * render - if there are body nodes, iterate over them and render each. Otherwise, call `Statement.render`
 
 ### CallExpression
@@ -191,10 +202,9 @@ fn(one, two)
 
 #### Behaviors
 
-* bind - If the callee is an `Identifier`, find the associated declaration, and throw an error if the declaration is a namespace or log a warning for "eval" calls.
-* hasEffects - return result of passing scope and callee to `callHasEffects`
-* initialiseNode - if node is at the program level, add it to bundle's dependent expressions
-* isUsedByBundle  - return result of calling `hasEffects`.
+* bind - If the callee is an `Identifier`, find the associated declaration, and throw an error if the declaration is a namespace or log a warning for "eval" calls. Then, call `Node.bind`
+* hasEffects - return true if node's `included` property is true, any of its arguments have effects, or the call has effects
+* hasEffectsWhenMutated - return true
 
 ### CatchClause
 
@@ -218,7 +228,7 @@ catch (e) {
 * initialiseChildren
   * if there is a param, initialise it and add it to scope's declarations
   * replace body node's scope with the node's scope
-* initialiseScope - create a new scope
+* initialiseScope - create a new scope that is a block scope
 
 ### ClassDeclaration
 
@@ -244,10 +254,9 @@ export default class {}
 #### Behaviors
 
 * gatherPossibleValues - add node to values set
-* hasEffects - return false
-* initialiseChildren - if the class has an `id`, set the class's name to its name, add the name to the scope's declarations, and initialize the `id` `Identifier` (`id` can be null for default exports)
-* render - if tree shaking and `activated` is false, remove the code
-* run - if part of a default export, run the parent export node
+* hasEffects - return node's `included` property
+* initialiseChildren - if the class has an `id`, set the node's name to its name, add the name to the scope's declarations, and initialize the `id` `Identifier` (`id` can be null for default exports). Then, call `Class.initialiseChildren`.
+* render - if tree shaking and `included` is false, remove the code
 
 ### ClassExpression
 
@@ -270,7 +279,7 @@ var x = class Thing {};
 
 #### Behaviors
 
-* initialiseChildren - if the class has an `id`, set the class's name to its name, add the name to the parent scope's declarations, and initialize the `id` `Identifier`
+* initialiseChildren - if the class has an `id`, set the class's name to its name, add the name to the parent scope's declarations, and initialize the `id` `Identifier`. Then, call `Class.initialiseChildren`
 
 ###  ConditionalExpression
 
@@ -295,6 +304,7 @@ test ? consequent : alternate
   * else, call `Node.initialiseChildren`
 * gatherPossibleValues - When test value is unknown, add both consequent and alternate to values set. Otherwise, execute conditional expression and only add the returned node.
 * getValue - Execute test and return unknown if result of test is unknown, otherwise return the value for consequent or alternate (depending on test value).
+* hasEffectsWhenMutated - return true
 * render - If tree shaking:
   * If test value is unknown, render everything
   * If test value is truthy, only render consequent (`true ? 'a' : 'b'` rendered as `'a'`)
@@ -348,11 +358,12 @@ export default function() {...}
 
 #### Behaviors
 
-* activate - set `activated` to true and call node's `run` method
 * addReference - set the node's name to the reference's name and if there is an original property, add the reference to that too
 * bind - get the name using the node's declaration and if there is a name, set node's original property by finding the declaration in the scope with that name. Then, call the node's declaration's bind method.
-* gatherPossibleValues - pass through to the node's declaration
-* getName - if original property is set, return that node's name, otherwise return the node's name property.
+* gatherPossibleValues - call declaration's `gatherPossibleValues` method
+* getName - if original property is set and not reassigned, return that node's name, otherwise return the node's name property.
+* includeDeclaration - if node's `included` property is true, return false. Otherwise, set `included` to true, call declaration's `includeInBundle` method, and return true.
+* includeInBundle - if the declaration's `shouldBeIncluded` method returns true, return result of calling declaration's `includeInBundle` method. Otherwise, return false.
 * initialiseNode
   * set node properties `isExportDeclaration` and `isDefault` to true
   * set the name property using the node's declaration
@@ -360,9 +371,6 @@ export default function() {...}
 * render - this behavior is fairly complicated. In essence, this does a couple of things:
   1. It removes `export default` because we just want a declaration in our code.
   2. For class and function exports, if they have no name, it will add `var <name>` (where name is derived from a reference to the function/class). For example, if we have `export default function() {}` and then a file imports that using `import fn from './module'`, Rollup will update the code to be `var fn = function() {}`.
-
-* run - set `shouldInclude` to true
-
 
 ### ExportNamedDeclaration
 
@@ -387,6 +395,7 @@ export { y }              // specifiers
 #### Behaviors
 
 * bind - If this export has a declaration, bind it
+* hasEffects - return node's `included` value or the result of calling declaration's `hasEffects` (if there is a declaration)
 * initialiseNode - set `isExportDeclaration` to true
 * render
   * for `export declaration`, remove the `export` from the code and render the declaration
@@ -411,7 +420,7 @@ fn();
 
 #### Behaviors
 
-* render - make sure that the statement is terminated with a semicolon
+* render - Call `Statement.render`, then make sure that the statement is terminated with a semicolon
 
 ### ForInStatement
 
@@ -439,8 +448,7 @@ for (let key in obj) {
   * initialize left node using the scope
   * initialize right node using the parent scope
   * initialize body (possibly replacing scope)
-  * set string type as possible value for left
-* initialiseScope - create a new scope
+* initialiseScope - create a new scope that is a block scope
 
 ### ForOfStatement
 
@@ -462,12 +470,12 @@ for (let key of iterable) {
 
 #### Behaviors
 
+* bind - call `Statement.bind`, then assign `left` node an `UNKNOWN_ASSIGNMENT` expression
 * initialiseChildren
   * initialize left node using the scope
   * initialize right node using the parent scope
   * initialize body (possibly replacing scope)
-  * set string type as possible value for left
-* initialiseScope - create a new scope
+* initialiseScope - create a new scope that is a block scope
 
 ### ForStatement
 
@@ -491,6 +499,7 @@ for (init; test; update) {
 #### Behaviors
 
 * initialiseChildren - Initialize init, test, and update nodes. If body is a block statement, initialize its scope and children. For other node types, just initialize.
+* initializeCScope - create a new scope that is a block scope
 
 ### FunctionDeclaration
 
@@ -515,13 +524,14 @@ function name(param1, param2) {
 
 #### Behaviors
 
-* activate - set `activated` to true, run all nodes in params array and run body node.
-* addReference - no-op
+* addReference - stub
+* assignExpression - add expression to node's assigned expressions
 * gatherPossibleValues - add self to values Set
 * getName - return the node's name property
-* initialiseChildren - If the node has an id: set node's name to id's name, add id to parent scope, and initialize the id node.
-* render - if tree shaking and not activated, remove the node
-* run - If the node is a child of an `ExportDefaultDeclaration`, run the node
+* hasEffectsWhenMutated - return node's `included` value
+* initialiseChildren - If the node has an id: set node's name to id's name, add id to parent scope, and initialize the id node. Then, call `Function.initialiseChildren`
+* initialiseNode - create a new set, saved as `assignedExpressions`, initialized with node as value
+* render - if tree shaking and not `included`, remove the node. Otherwise, render
 
 ### FunctionExpression
 
@@ -546,10 +556,9 @@ let fn = function() {}
 
 #### Behaviors
 
-* activate - set `activated` to true, run all nodes in params array and run body node.
-* addReference - no-op
+* addReference - stub
 * getName - return the node's name property
-* intialiseChildren - If the node has an id: set node's name to id's name, add id to parent scope, and initialize the id node.
+* intialiseChildren - If the node has an id: set node's name to id's name, add id to parent scope, and initialize the id node. Then, call `Function.initialiseChildren`
 
 ### Identifier
 
@@ -568,10 +577,13 @@ const x = 'hello';
 
 #### Behaviors
 
+* assignExpression - if the node has a declaration, add the expression to its assigned expressions
 * bind - If the node is a reference or part of a left hand side assignment (default value), find and set the node's declaration and add the node to the declaration's references
 * gatherPossibleValues - if the node is a reference (not a property or a rename), add it to set
+* hasEffectsWhenAssigned - if there is a declaration, return its `included` value
+* hasEffectsWhenMutated - if there is a declaration, return true if it has a truthy value for any of these properties: `included`, `isParam`, `isGlobal`, `isExternal`, `isNamespace`, or if any of the node's assigned expressions have effects when mutated.
+* includeInBundle - if already included, return false. Otherwise, set `included` to true, call declaration's `includeDeclaration` method, and return true.
 * render - If the node has a declaration, and the declaration has a different name than the node's name, overwrite code using declaration's name. For re-named property identifiers, include old name (`oldName: newName`).
-* run - If the node has a declaration, activate it
 
 ### IfStatement
 
@@ -607,7 +619,7 @@ if (condition) {
   * if not tree shaking, just render
   * otherwise, using the test value
     * set the test code to the test value
-    * for any hoisted variables, add them to the code
+    * for any hoisted variables, add them to the code if they are `included`
     * if test value is truthy, only render the consequent
     * if test value is falsy, only render the alternate
 
@@ -630,7 +642,7 @@ import * as Grouped from 'module';
 
 #### Behaviors
 
-* bind - no-op
+* bind - stub
 * initialiseNode - set `isImportDeclaration` to true
 * render - remove the node
 
@@ -674,7 +686,7 @@ thing && thing.property
 
 #### Behaviors
 
-* getValue - if either the left or right node's value is unknown, return unknown. Otherwise, return the result of executing the expression
+* getValue - if either the left or right node's value is unknown, return `UNKNOWN_VALUE`. Otherwise, return the result of executing the expression
 
 ### MemberExpression
 
@@ -694,11 +706,13 @@ object['property']
 #### Behaviors
 
 * bind - walk through properties to create a "key path". Then, trace path to find the root declaration for the node, setting it as the node's declaration. (This is actually more complicated than this description, but will do for now.)
-* getPossibleValues - add unknown to values set
+* getPossibleValues - add `UNKNOWN_ASSIGNMENT` to values set
+* hasEffectsWhenAssigned - return value of calling `object` node's `hasEffectsWhenMutated`
+* hasEffectsWhenMutated - return true
+* includeInBundle - determine if there are any new nodes to add to bundle. If there is a declaration and it isn't already included, include it and set new nodes added to true. Return new nodes added value.
 * render
   * if the node has a declaration and with a different, overwrite code with new name. 
   * if the node has a replacement name, overwite code with replacement name
-* run - if the node has a declaration, activate it
 
 ### NewExpression
 
@@ -717,11 +731,11 @@ new Thing(arg1, arg2)
 
 #### Behaviors
 
-* hasEffects - return result of passing scope and callee to `callHasEffects`
+* hasEffects - return node's `included` value or result of passing scope and callee to `callHasEffects`
 
-### ObjectExpression
+### ObjectPattern
 
-[Source](https://github.com/rollup/rollup/blob/master/src/ast/nodes/ObjectExpression.js)
+[Source](https://github.com/rollup/rollup/blob/master/src/ast/nodes/ObjectPattern.js)
 
 #### Example 
 
@@ -735,7 +749,77 @@ new Thing(arg1, arg2)
 
 #### Behaviors
 
-* gatherPossibleValues - add object type to values set
+* assignExpression - assign `UNKNOWN_ASSIGNMENT` to all child node's
+* hasEffectsWhenAssigned - return true if any child has effects when assigned
+
+### Property
+
+[Source](https://github.com/rollup/rollup/blob/master/src/ast/nodes/Property.js)
+
+#### Example
+
+```
+// any of the lines below (a,b,c, d)
+{
+  a: 'Ayy',
+  b() {...},
+  c,
+  [d]: 'Dee'
+}
+```
+
+#### Properties
+
+* method - true if if `key()` format
+* shorthand - true if in `{ key }` format
+* computed - true if in `{ [key]: ... }` format
+* key - an `Identifier`
+* value - a `Literal`, pattern, or expression
+* kind - "init"??
+
+#### Behaviors
+
+* assignExpression - assign expression to value node
+* hasEffectsWhenAssigned - return result of calling value node's `hasEffectsWhenAssigned`
+* render - if not shorthand, render the key. render the value.
+
+### RestElement
+
+[Source](https://github.com/rollup/rollup/blob/master/src/ast/nodes/RestElement.js)
+
+#### Example
+
+```js
+// the "...rest" element
+const [first, ...rest] = [1,2,3,4];
+```
+
+#### Properties
+
+* argument - an `Identifier`
+
+#### Behaviors
+
+* assignExpression - assign `UNKNOWN_ASSIGNMENT` to argument node
+* hasEffectsWhenAssigned - return result of calling argument node's `hasEffectsWhenAssigned`
+
+### ReturnStatement 
+
+[Source](https://github.com/rollup/rollup/blob/master/src/ast/nodes/ReturnStatement.js)
+
+#### Example
+
+```js
+return something;
+```
+
+#### Properties
+
+* argument - an `Identifier`, `Literal`, or expression
+
+#### Behaviors
+
+* shouldBeIncluded - return true
 
 ### SwitchStatement
 
@@ -764,7 +848,7 @@ default:
 
 #### Behaviors
 
-* initialiseScope - create a new scope
+* initialiseScope - create a new scope that is a block scope
 
 ### TaggedTemplateExpression
 
@@ -787,8 +871,6 @@ tag\`template string\`
   * throw an error is the declaration is a namespace
   * log a warning if the tag is "eval" 
 * hasEffects - return true if the quasi has effects or the tag has effects
-* initialiseNode - if the node is at the program level, add it to the bundle's array of dependent expressions
-* isUsedByBundle - return the result of calling the node's `hasEffects` method
 
 ### TemplateLiteral
 
@@ -824,6 +906,7 @@ this.value('hi!');
 
 #### Behaviors
 
+* hasEffectsWhenMutated - return true
 * initialiseNode - find the node's scope's "lexical boundary" scope. If that is a module scope, set the node's alias to the module's context. Log a warning if that alias is undefined.
 * render - if the node has an alias (lexical boundary scope is module scope), overwrite "this" with alias
 
@@ -867,8 +950,8 @@ typeof joke
 #### Behaviors
 
 * bind - only bind when the node's value is unknown
-* getValue - get the value from the node's argument property. If that is unknown, return unknown, otherwise execute the operator and return that value.
-* hasEffects - if operator is `delete` return true, otherwise return result of calling argument node's `hasEffects` method.
+* getValue - get the value from the node's arguments property. If that is unknown, return `UNKNOWN_VALUE`, otherwise execute the operator and return that value.
+* hasEffects - return true if `included`, argument node has effects, or the operator is `delete` and either the argument is not a `MemberExpression` or the argument's object node has effects when mutated.
 * initialiseNode - set node's value property by calling node's `getValue` method.
 
 ### UpdateExpression
@@ -889,10 +972,8 @@ variable++
 
 #### Behaviors
 
-* bind - set node's subject to the its argument. Throw error if the update is not legal. If the subject is an `Identifier`, find the id's declaration node, set that node's `isReassigned` property to true and add "number" to the declaration's possible values
-* hasEffects - return result of calling `isUsedByBundle`
-* initialiseNode - add to bundle's array of dependent expressions
-* isUsedByBundle - return result of calling `isUsedByBundle` (same as `hasEffects`)
+* bind - Throw error if the update is not legal. If the subject is an `Identifier`, find the id's declaration node, set that node's `isReassigned` property to true. Finally, call `Node.bind`
+* hasEffects - return `included` or result of calling argument node's `hasEffectsWhenAssigned`
 
 ### VariableDeclaration
 
@@ -913,6 +994,8 @@ const three = 3, four = 4;
 
 #### Behaviors
 
+* assignExpression - for each child, assign them the `UNKNOWN_ASSIGNMENT` expression
+* includeInBundle - if already fully included, return false. Otherwise, iterate over declarations to determine if any are new. If `included` is false or there are new nodes, set `included` to true and return true. Otherwise, return false.
 * render - This is pretty complex
   * Determine if we should separate the declarators. By default Rollup doesn't separate declarators, but it does for module level declarations (unless the are part of a for statement).
   * Keep an "empty" variable with the default value of true and c, which is an index in the code
@@ -921,12 +1004,12 @@ const three = 3, four = 4;
       * get the declarator's proxy
       * if the declarator is exported and its value is reassigned
         * if the declarator has a truthy init property, prepend the prefix to the code and set "empty" to false
-      * otherwise, if we are not treeshaking or the proxy is activated
+      * otherwise, if we are not treeshaking or the proxy is included
         * if Rollup should separate, insert prefix and kind (ie turn `x = 2` to `const x = 2`)
     * otherwise
-      * set "activated" to false
-      * get all of the names from the declarator. This would be for the pattern types. For example, from `{ a, b } = {...}`, we would get `a` and `b`. There is some unimplemented code here, but if the declarator is activated, then set "activated" to true.
-      * if not tree shaking or activated is true
+      * set "included" to false
+      * get all of the names from the declarator. This would be for the pattern types. For example, from `{ a, b } = {...}`, we would get `a` and `b`. There is some unimplemented code here, but if the declarator is included, then set "included" to true.
+      * if not tree shaking or included is true
         * if declarator should be separated, insert prefix and kind into code
         * set "empty" to false
     * render the declarator
@@ -952,8 +1035,8 @@ x = 'exit'
 
 #### Behaviors
 
-* activate - set node's activated property to true, call the node's run method, and if the node's declaration type is "var" (so that it gets hoisted), make sure that the block that the declarator is in does not get tree shaken
-* hasEffects - return result of calling init node's `hasEffects` method
+* assignExpression - for each proxy, assign them the `UNKNOWN_ASSIGNMENT` expression
+* hasEffects - return result of calling init node's `hasEffects` method or extract all of the names from the `id` node and return true if any of their proxies are `included`.
 * initialiseNode
   * create a proxies map
   * find the node's lexical boundary scope
